@@ -34,4 +34,124 @@ The **training process** in the provided DQN training script for battery storage
 ### 8. **Training Termination:**
    - The training process terminates after completing the set number of episodes (12,000), and results are saved for further analysis.
 
-This process ensures that the agent learns to optimize battery storage operations by repeatedly interacting with the environment and adjusting its policy based on observed rewards (profits from charging/discharging the battery) and state transitions【11†source】【12†source】.
+This process ensures that the agent learns to optimize battery storage operations by repeatedly interacting with the environment and adjusting its policy based on observed rewards (profits from charging/discharging the battery) and state transitions.
+
+Let's walk through the entire **training process** with relevant code snippets from the script and detailed explanations for all key parameters like learning rate, buffer size, batch size, gamma, tau, and update:
+
+### 1. **Setup Environment and Model:**
+
+Snippet:
+```python
+env = Battery(env_settings)
+state_size = (env.observation_space.shape[0])
+action_size = len(env.action_space)
+```
+- **Environment:** The `Battery` class defines the custom environment for the battery storage system. It uses `env_settings`, which includes parameters like `battery_capacity`, `battery_energy`, `standby_loss`, etc. This class models the battery dynamics (charging, discharging, and degradation) as well as interactions with external electricity prices.
+- **State and Action Size:** The `state_size` represents the dimensions of the observation space (i.e., the number of features representing the environment's state at each timestep). The `action_size` is the number of discrete actions the agent can take, representing different levels of charge/discharge.
+
+### 2. **Epsilon-Greedy Exploration:**
+
+Snippet:
+```python
+epsilon = 1.0
+epsilon_end = 0.01
+epsilon_decay = 0.9995
+```
+- **Epsilon-greedy:** This is the exploration strategy used by the DQN agent. The agent starts with a high probability (`epsilon=1.0`) of choosing a random action (exploration). Over time, `epsilon` decays using `epsilon_decay = 0.9995`, gradually shifting the agent towards more exploitation (choosing the best-known action). The decay continues until `epsilon` reaches `epsilon_end = 0.01`, meaning that 99% of the actions will be the agent's best action based on the Q-network, while 1% will still be random exploration.
+
+### 3. **Episode Loop:**
+
+Snippet:
+```python
+for ep in range(n_episodes):  # loop through episodes
+    cur_state = env.reset()  # reset environment
+    for step in range(time_range):
+        action = dqn_agent.action(cur_state, epsilon)  # select action
+        new_state, reward, done, info = env.step(cur_state, action, step)  # environment step
+        dqn_agent.step(cur_state, action, reward, new_state, update, batch_size, gamma, tau, done)  # agent update
+```
+- **Episode:** Each episode consists of a sequence of timesteps (168 in this case). At the beginning of each episode, the environment is reset, initializing the battery and market conditions.
+- **State-Action-Reward-Next-State Loop:** The agent selects an action using the epsilon-greedy policy. The environment processes the action and returns the new state, reward, and whether the episode is done (`done`), indicating that the episode should terminate.
+
+### 4. **Agent-Environment Interaction:**
+
+Snippet:
+```python
+action = dqn_agent.action(cur_state, epsilon)
+new_state, reward, done, info = env.step(cur_state, action, step)
+```
+- **Action:** The agent uses the DQN to select an action based on the current state and the exploration factor `epsilon`.
+- **Reward and Next State:** The environment updates the state and calculates the reward. In this battery optimization problem, rewards are based on electricity prices, battery efficiency, and degradation. The agent learns to maximize cumulative rewards by finding the optimal battery charging/discharging policy.
+
+### 5. **Q-Network Update:**
+
+Snippet:
+```python
+dqn_agent.step(cur_state, action, reward, new_state, update, batch_size, gamma, tau, done)
+```
+- **Learning Rate (`learning_rate = 25e-5`):** The learning rate determines the step size when updating the Q-network weights. A smaller value leads to more conservative updates, preventing the network from overfitting too quickly to noisy signals.
+  
+- **Buffer Size (`buffer_size = int(1e5)`):** The replay buffer stores the agent’s experiences (state, action, reward, next state). The agent samples batches from this buffer to update the Q-network. The buffer size defines how many experiences can be stored. A larger buffer allows the agent to learn from a diverse set of past experiences.
+
+- **Batch Size (`batch_size = 32`):** The batch size is the number of experiences sampled from the replay buffer for each training update. A larger batch size improves stability by averaging over more experiences but increases computational cost.
+
+- **Discount Factor (`gamma = 0.99`):** The discount factor represents the agent’s foresight. A value close to 1 (like 0.99) means that the agent values future rewards almost as much as immediate rewards. This helps the agent learn long-term strategies (e.g., the battery discharges now to profit from higher prices in the future).
+
+- **Target Network Update (`tau = 0.001`):** The target network is used to stabilize training. In DQN, instead of updating the Q-network directly, the target network is slowly updated towards the Q-network over time using a soft update. The parameter `tau = 0.001` controls the speed of this update, meaning the target network gets 0.1% closer to the Q-network after each update.
+
+- **Update Frequency (`update = 16`):** This parameter controls how often the agent updates the Q-network. Every 16 steps, the agent samples from the replay buffer and performs a Q-network update. This reduces the computational load and improves stability by not updating the network after every single step.
+
+### 6. **Profit Calculation:**
+
+Snippet:
+```python
+episode_profit += info["ts_cost"]
+cumlative_profit.append(cumlative_profit[-1] + info["ts_cost"])
+```
+- **Profit Tracking:** At each timestep, the profit (based on electricity price and battery operation costs) is stored in `episode_profit`. The cumulative profit for the current episode is tracked in `cumlative_profit` to assess how well the agent is optimizing the battery's operations.
+
+### 7. **Model Saving and Plotting:**
+
+Snippet:
+```python
+torch.save(dqn_agent.qnet.state_dict(), f'/content/drive/My Drive/Battery-RL/trained_models/dqn_{model}.pth')
+```
+- **Model Saving:** After completing all episodes, the trained Q-network for each model (e.g., `vanilla`, `double_dueling`) is saved. This allows for future testing and evaluation.
+  
+Snippet:
+```python
+with open(f"/content/drive/My Drive/Battery-RL/rewards/rewards_{model}.pkl", "wb") as episode_rewards:
+    dump(scores, episode_rewards)
+```
+- **Saving Rewards:** The rewards for each episode are saved for analysis.
+
+Snippet:
+```python
+for idx, model in enumerate(dqn_models):
+    plt.plot(dqn_model_profits[model], label=f'{model}')
+plt.legend(loc="lower right")
+plt.show()
+```
+- **Profit Plotting:** The script plots the cumulative profit for each DQN model to compare performance. This visualizes how well each model optimizes battery operations over time.
+
+### 8. **Training Termination:**
+
+Snippet:
+```python
+for model in dqn_models:  # loop for each model type
+```
+- **Multiple Models:** The script runs through different DQN variants (`vanilla`, `double_dueling`) and trains each model independently.
+  
+- After training, the script terminates and saves the results (Q-network, rewards, profits) for future use and analysis.
+
+---
+
+### Parameter Summary:
+- **Learning Rate:** Controls the step size during the Q-network updates (`25e-5`).
+- **Buffer Size:** The maximum number of experiences stored in the replay buffer (`1e5`).
+- **Batch Size:** The number of experiences sampled from the replay buffer per update (`32`).
+- **Gamma:** The discount factor for future rewards, encouraging long-term reward maximization (`0.99`).
+- **Tau:** The rate of soft updates for the target network, stabilizing training (`0.001`).
+- **Update Frequency:** The interval (steps) between Q-network updates (`16`).
+
+This setup ensures that the agent efficiently learns to optimize battery charging and discharging while balancing exploration, stability, and long-term planning.
